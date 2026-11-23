@@ -1,0 +1,62 @@
+name: Build Mamori APK
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "ndk;29.0.14206865"
+
+      - name: Native tunnel (hev-socks5-tunnel)
+        run: |
+          export NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          bash compile-hevtun.sh
+          cp -r libs V2rayNG/app
+
+      - name: Xray core (libv2ray.aar)
+        run: |
+          cd AndroidLibXrayLite
+          git fetch --unshallow --tags --force 2>/dev/null || git fetch --tags --force || true
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          cd ..
+          mkdir -p V2rayNG/app/libs
+          if [ -n "$TAG" ]; then
+            URL="https://github.com/2dust/AndroidLibXrayLite/releases/download/$TAG/libv2ray.aar"
+          else
+            URL="https://github.com/2dust/AndroidLibXrayLite/releases/latest/download/libv2ray.aar"
+          fi
+          echo "Downloading $URL"
+          curl -fL -o V2rayNG/app/libs/libv2ray.aar "$URL"
+
+      - name: Build APK
+        working-directory: V2rayNG
+        run: |
+          chmod +x gradlew
+          ./gradlew assemblePlaystoreDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mamori-apk
+          path: V2rayNG/app/build/outputs/apk/**/*.apk
